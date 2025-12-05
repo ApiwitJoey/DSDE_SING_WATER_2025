@@ -23,7 +23,8 @@ OUTPUT_DIR = "/opt/airflow/data/raw_condo"
 # 🔧 Price Cleaner
 # ==========================================
 def clean_price_value(price_str):
-    if not price_str: return None
+    if not price_str: 
+        return None
     try:
         clean = price_str.replace(",", "").replace("บาท", "").strip()
         m = re.search(r"(\d+)", clean)
@@ -51,17 +52,24 @@ def extract_details(soup):
         for li in ul.find_all("li"):
             label_tag = li.find("label")
             span_tag = li.find("span")
-            if not label_tag or not span_tag: continue
+            if not label_tag or not span_tag:
+                continue
 
             label = label_tag.get_text(strip=True)
             value = span_tag.get_text(strip=True)
 
-            if label == "ราคา": details["Price"] = clean_price_value(value)
-            elif label == "รูปแบบห้อง": details["Room_Type"] = value
-            elif label == "ห้องอยู่ชั้นที่": details["Floor"] = value
-            elif label == "จำนวนห้องนอน": details["Bedrooms"] = value
-            elif label == "จำนวนห้องน้ำ": details["Bathrooms"] = value
-            elif label == "ขนาดพื้นที่ห้อง": details["Room_Size"] = value
+            if label == "ราคา":
+                details["Price"] = clean_price_value(value)
+            elif label == "รูปแบบห้อง":
+                details["Room_Type"] = value
+            elif label == "ห้องอยู่ชั้นที่":
+                details["Floor"] = value
+            elif label == "จำนวนห้องนอน":
+                details["Bedrooms"] = value
+            elif label == "จำนวนห้องน้ำ":
+                details["Bathrooms"] = value
+            elif label == "ขนาดพื้นที่ห้อง":
+                details["Room_Size"] = value
 
     return details
 
@@ -75,15 +83,15 @@ def get_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("user-agent=Mozilla/5.0")
-    
+
     # Path สำหรับ Docker Image ที่เราลง Chromium ไว้
     options.binary_location = "/usr/bin/chromium"
     service = Service("/usr/bin/chromedriver")
-    
+
     return webdriver.Chrome(service=service, options=options)
 
 # ==========================================
-# 📍 Scrape Function
+# 📍 Scrape Function (Resume Safe)
 # ==========================================
 def scrape_one_district(district_name):
     print(f"\n📍 Processing District: {district_name}")
@@ -96,78 +104,102 @@ def scrape_one_district(district_name):
         return
 
     df = pd.read_csv(input_path)
+
     # หา Column ที่ชื่อมีคำว่า url หรือ link
     link_col = next((c for c in df.columns if "url" in c.lower() or "link" in c.lower()), None)
-    
+
     if not link_col:
         print("❌ CSV format incorrect (no url column)")
         return
 
+    # ---------------------------------------------------------
+    # 🧩 โหลดไฟล์เดิมถ้ามี เพื่อนำมา skip + append
+    # ---------------------------------------------------------
+    already_scraped = set()
+    if os.path.exists(output_path):
+        old_df = pd.read_csv(output_path)
+        if "Original_Link" in old_df.columns:
+            already_scraped = set(old_df["Original_Link"])
+        print(f"📄 Loaded existing file with {len(already_scraped)} previous rows")
+    else:
+        old_df = pd.DataFrame()
+
     driver = get_driver()
     wait = WebDriverWait(driver, 10)
-    data_list = []
-    total = len(df)
 
-    # สร้าง Folder ปลายทางรอไว้เลย (แก้ปัญหา OSError)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    new_rows = []
+    total = len(df)
 
     for idx, row in df.iterrows():
         url = row[link_col]
+
+        # Skip URL ที่เคย scrape แล้ว
+        if url in already_scraped:
+            print(f"   [{idx+1}/{total}] ⏩ Skip (already scraped): {url}")
+            continue
+
         print(f"   [{idx+1}/{total}] Scraping: {url}")
 
         try:
             driver.get(url)
             wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             soup = BeautifulSoup(driver.page_source, "html.parser")
-            
+
             info = extract_details(soup)
             info["Original_Link"] = url
-            
-            # Print เช็คราคา
-            p = info.get('Price')
-            print(f"      ---> Price: {p if p else 'N/A'}")
-            
-            data_list.append(info)
+
+            print(f"      ---> Price: {info.get('Price', 'N/A')}")
+            new_rows.append(info)
+
+            # Backup ทุก 10 รายการ
+            if len(new_rows) % 10 == 0:
+                combined = pd.concat([old_df, pd.DataFrame(new_rows)], ignore_index=True)
+                combined.to_csv(output_path, index=False, encoding="utf-8-sig")
+                print("      💾 Backup Saved.")
 
         except Exception as e:
             print(f"      ❌ Error: {e}")
 
-        # Backup ทุก 10 รายการ
-        if len(data_list) % 10 == 0 and len(data_list) > 0:
-            pd.DataFrame(data_list).to_csv(output_path, index=False, encoding="utf-8-sig")
-            print("      💾 Backup Saved.")
-
     driver.quit()
 
-    # Final Save
-    if data_list:
-        pd.DataFrame(data_list).to_csv(output_path, index=False, encoding="utf-8-sig")
-        print(f"✅ Finished {district_name}: {len(data_list)} rows saved.")
+    # ---------------------------------------------------------
+    # 🔥 Save Final = append old + new
+    # ---------------------------------------------------------
+    if new_rows:
+        combined = pd.concat([old_df, pd.DataFrame(new_rows)], ignore_index=True)
+        combined.to_csv(output_path, index=False, encoding="utf-8-sig")
+        print(f"✅ Finished {district_name}: {len(new_rows)} new rows saved.")
     else:
-        print(f"⚠️ No data extracted for {district_name}")
+        print(f"⚠️ No new data for {district_name} (all URLs already scraped)")
 
 # ==========================================
-# 🚀 MAIN (Modified for Airflow)
+# 🚀 MAIN (Support Airflow Argument)
 # ==========================================
 def main():
     print("🚀 Starting Condo Details Scraper...")
 
-    # เช็คว่ามีการส่งชื่อเขตมาไหม? (จาก Airflow)
+    # เช็คว่า Airflow ส่ง argument เขตมาหรือเปล่า
     if len(sys.argv) > 1:
         target_district = sys.argv[1]
         print(f"🎯 Targeted Mode: Scraping ONLY '{target_district}'")
         scrape_one_district(target_district)
-    
+
     else:
-        # ถ้าไม่มี Argument ให้ทำทุกไฟล์ที่เจอ (Batch Mode)
+        # Batch mode - ทำทุกเขตที่มีไฟล์
         print("🔄 Batch Mode: Scraping ALL found link files...")
         files = glob.glob(os.path.join(INPUT_DIR, "links_*.csv"))
-        
+
         if not files:
             print(f"❌ No link files found in {INPUT_DIR}")
             return
 
-        districts = [os.path.basename(f).replace("links_", "").replace(".csv", "") for f in files]
+        districts = [
+            os.path.basename(f).replace("links_", "").replace(".csv", "")
+            for f in files
+        ]
+
         for d in districts:
             scrape_one_district(d)
 
