@@ -1,0 +1,13 @@
+.env
+# Log files
+*.log
+*.out
+*.err
+
+# Log folders
+logs/
+log/
+tmp/
+
+Data/
+

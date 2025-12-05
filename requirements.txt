@@ -1,0 +1,10 @@
+kafka-python-ng
+pandas
+geopy
+requests
+beautifulsoup4
+lxml
+streamlit==1.40.0
+pydeck==0.9.1
+selenium
+webdriver-manager
