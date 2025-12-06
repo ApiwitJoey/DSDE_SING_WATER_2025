@@ -10,4 +10,5 @@ log/
 tmp/
 
 Data/
+__pycache__/
 
