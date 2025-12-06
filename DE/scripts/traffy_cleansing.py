@@ -73,7 +73,7 @@ def main():
         # --- Run DBSCAN ---
         # eps=0.005 (~500 เมตร), min_samples=5
         try:
-            db = DBSCAN(eps=0.005, min_samples=5).fit(X)
+            db = DBSCAN(eps=0.001, min_samples=5).fit(X)
             sub['cluster'] = db.labels_
 
             # --- กรอง noise (Cluster = -1 คือ Noise) ---
