@@ -96,10 +96,19 @@ services:
         condition: service_completed_successfully
 
   streamlit-viz:
-    <<: *airflow-common
-    command: streamlit run /opt/airflow/viz/app.py --server.port 8501 --server.address 0.0.0.0
+    image: python:3.10-slim
+    container_name: ${PROJECT_NAME}-streamlit-viz
     ports:
       - "8501:8501"
-    restart: always
-    depends_on:
-      - airflow-scheduler
+    volumes:
+      - ./Viz:/app/Viz           # Map โค้ด App
+      - ./Data:/app/Data         # Map ข้อมูล (เพื่อให้เห็นไฟล์ที่ Airflow สร้าง)
+    working_dir: /app
+    command: >
+      bash -c "pip install pandas numpy streamlit pydeck altair fastparquet &&
+               streamlit run Viz/app.py --server.address=0.0.0.0"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
