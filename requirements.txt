@@ -8,3 +8,4 @@ streamlit==1.40.0
 pydeck==0.9.1
 selenium
 webdriver-manager
+scikit-learn
