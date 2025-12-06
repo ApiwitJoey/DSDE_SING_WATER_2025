@@ -36,7 +36,7 @@ with DAG(
     'parallel_condo_pipeline',
     default_args=default_args,
     description='Link -> Scrape (Parallel by District) -> Cleansing',
-    schedule=None,  # 10 โมงเช้าไทย
+    schedule=None,  
     start_date=datetime(2023, 12, 1),
     catchup=False,
     max_active_tasks=6, # เพิ่มขึ้นหน่อยเพราะเรามี Task ย่อยเยอะขึ้น (Link+Scrape)
