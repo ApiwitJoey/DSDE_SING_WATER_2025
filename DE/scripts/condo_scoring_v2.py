@@ -93,132 +93,53 @@ def classify_price_risk(row, price_th, risk_th):
 
 # -------------------------- Clustering Part --------------------------
 
-def haversine_vectorized(lat1, lon1, lat2, lon2):
-    """
-    คำนวณระยะทาง (km) ระหว่างจุด 1 จุด (lat1) กับ หลายจุด (lat2 array)
-    """
-    R = 6371  # รัศมีโลก (km)
-    
-    # แปลง Degree -> Radians
-    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
-    
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    
-    a = np.sin(dlat/2.0)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2.0)**2
-    c = 2 * np.arcsin(np.sqrt(a))
-    
-    return R * c
+def kmeans_clustering(df_input, k = 4):
+    df = df_input.copy().reset_index(drop=True)
 
-def sum_problem_by_type_vectorized(condo_lat, condo_lon, traffy_df):
+    df['Affordability_Index'] = -1 * df['price_per_sqm']
 
-    RADIUS_KM = CONDO_BUFFER_RADIUS_M / 1000.0
-    BASE_SCORE = 1.0
-    
-    # ⚖️ Weight (น้ำหนักการหักคะแนน)
-    W_UNFINISHED = 0.05       # งานไม่เสร็จ (หักหนัก)
-    W_FINISHED_BAD = 0.01     # งานเสร็จแต่ดาวน้อย (<3 ดาว)
-    W_FINISHED_GOOD = 0.001   # งานเสร็จและดี (หักนิดเดียว เป็นแค่ Noise)
+    df.dropna(subset=['Affordability_Index'], inplace=True)
 
-    if traffy_df.empty:
-        return BASE_SCORE
-
-    # 1. คำนวณระยะทางทั้งหมดรวดเดียว
-    dists = haversine_vectorized(condo_lat, condo_lon, traffy_df['lat'].values, traffy_df['lon'].values)
-    
-    # 2. กรองเฉพาะที่อยู่ในรัศมี (Filter Mask)
-    mask = dists <= RADIUS_KM
-    nearby_issues = traffy_df[mask].copy()
-    nearby_dists = dists[mask]
-    
-    if len(nearby_issues) == 0:
-        return BASE_SCORE
-
-    # 3. เตรียม Weight เบื้องต้นตาม State
-    # สร้าง array ของ weight ขึ้นมา
-    weights = np.where(
-        nearby_issues['state'] == 'เสร็จสิ้น',
-        np.where(nearby_issues['star'].fillna(0) < 3, W_FINISHED_BAD, W_FINISHED_GOOD),
-        W_UNFINISHED
-    )
-    
-    # 4. Keyword Boosting: map each nearby issue type to a category (using TYPE_TO_CATEGORY)
-    # และนำ weight ของ category มาคูณกับ weight เดิม (vectorized)
-    types_series = nearby_issues['type'].astype(str)
-    # start with default category for all rows
-    categories = np.array([DEFAULT_CATEGORY] * len(types_series))
-    for keyword, cat in TYPE_TO_CATEGORY.items():
-        # escape keyword (handles "PM2.5" etc.) and build mask
-        mask = types_series.str.contains(re.escape(keyword), na=False).values
-        categories[mask] = cat
-    # map categories to multipliers and apply
-    multipliers = np.array([CATEGORY_WEIGHTS.get(c, CATEGORY_WEIGHTS[DEFAULT_CATEGORY]) for c in categories])
-    weights = weights * multipliers
-    
-    # 5. Distance Decay (ยิ่งไกล ยิ่งผลน้อย)
-    # ที่ระยะ 0km -> factor = 1.0
-    # ที่ระยะ RADIUS_KM -> factor = 0.0
-    dist_factors = 1.0 - (nearby_dists / RADIUS_KM)
-    
-    # 6. รวม Penalty
-    # Penalty = sum(weight * dist_factor)
-    total_penalty = np.sum(weights * dist_factors)
-    
-    return total_penalty
-
-def kmeans_clustering(df, k = 4):
-    df_pca = df.copy().reset_index(drop=True)
-
-    df_pca['Room_Size_sqm'] = df_pca['Room_Size'].str.replace(' ตร.ม.', '', regex=False).astype(float, errors='ignore')
-
-    df_pca['Price_Per_SqM'] = df_pca['Price'] / df_pca['Room_Size_sqm']
-    df_pca['Affordability_Index'] = -df_pca['Price_Per_SqM']
+    df['weight_price_score'] = -df['price_score_0_100']
 
     features = [
         'Price',
         'Affordability_Index',
+        'weight_price_score',
         'latitude',
         'longitude',
-        'weighted_problem_count'
+        'overall_score_0_100',
     ]
 
-    X = df_pca[features].copy()
-    X['positive_influence_problem'] = -X['weighted_problem_count']
-    scoring_features = [
-        'Price',
-        'Affordability_Index',
-        'latitude',
-        'longitude',
-        'positive_influence_problem'
-    ]
-
-    original_index = X.index
-    X_processed = X[scoring_features].dropna()
-    processed_indices = X_processed.index 
+    X = df[features].copy()
+    processed_indices = X.index 
 
     scaler = StandardScaler()
-    X_scaled_array = scaler.fit_transform(X_processed)
+    X_scaled_array = scaler.fit_transform(X)
 
     # Apply PCA
-    pca = PCA(n_components=3)
+    pca = PCA(n_components=4)
     principal_components = pca.fit_transform(X_scaled_array)
-
     variance_ratios = pca.explained_variance_ratio_
     pc1 = principal_components[:, 0]
     pc2 = principal_components[:, 1]
-    pc3 = principal_components[:, 2]
+    # pc3 = principal_components[:, 2]
+    pc4 = principal_components[:, 3]
+        
+    w1, w2, w3, w4 = variance_ratios[0], variance_ratios[1], variance_ratios[2], variance_ratios[3]
+    total_weight = w1 + w2 + w4
+    weighted_score_series = ( (w1 * pc1) + (w2 * pc2) + (w4 * pc4) ) / total_weight
 
-    w1, w2, w3 = variance_ratios[0], variance_ratios[1], variance_ratios[2]
-    total_weight = w1 + w2 + w3
-
-    weighted_score_series = ( (w1 * pc1) + (w2 * pc2) + (w3 * pc3) ) / total_weight
-
-    full_score_series = pd.Series(np.nan, index=df_pca.index)
+    full_score_series = pd.Series(np.nan, index=df.index)
     full_score_series.loc[processed_indices] = weighted_score_series
 
-    df_pca['Weighted_Composite_Score'] = full_score_series
+    df['Weighted_Composite_Score'] = full_score_series
 
-    X_clusters = principal_components
+    principal_components_filtered = principal_components[:, [0, 1, 3]]
+    variance_ratios_filtered = variance_ratios[[0, 1, 3]]
+
+
+    X_clusters = principal_components_filtered
 
     kmeans_model = KMeans(n_clusters=k, random_state=42, n_init=10)
     cluster_labels = kmeans_model.fit_predict(X_clusters)
@@ -229,9 +150,24 @@ def kmeans_clustering(df, k = 4):
         columns=['Cluster_Label']
     )
 
-    df_kmean = df_pca.join(cluster_df, how='left')
+    df_kmean = df.join(cluster_df, how='left')
 
     df_kmean['Cluster_Label'] = df_kmean['Cluster_Label'].astype('category')
+
+    # Label Mapping
+    cluster_map = {
+        0: "Premium Low-Risk",
+        1: "Value & High-Risk",
+        2: "Ultra-Luxury",
+        3: "Affordable Entry-Level",
+    }
+
+    labels_col = "Cluster_Label"
+
+    mapped = df_kmean[labels_col].astype(object).map(cluster_map)
+
+    # ✅ Attach Cluster Labels to FINAL Output
+    df_kmean["Cluster_Label"] = mapped.fillna("Other")
 
     return df_kmean
 
@@ -361,43 +297,15 @@ def run_condo_scoring_v2():
     condos_features["overall_score_0_100"] = (0.7 * condos_features["safety_score_0_100"]) + (0.3 * (100 - condos_features["price_score_0_100"]))
     condos_features["livability"] = condos_features["overall_score_0_100"] / 100.0 # Normalize 0-1 for Viz
 
+    # 7. EXPORT
+    output_df = condos_features.drop(columns=["geometry"])
+
     # ===================== CLUSTERING (PCA + KMEANS) =====================
 
     print("🔗 Running PCA + KMeans Clustering...")
 
-    # Use ORIGINAL traffy (before explode) for spatial weighted sum
-    problem_sum_pca = condos.apply(
-        lambda row: sum_problem_by_type_vectorized(
-            row['latitude'], row['longitude'], traffy
-        ), 
-        axis=1
-    )
-
-    condos_pca = condos.copy()
-    condos_pca["weighted_problem_count"] = problem_sum_pca
-
-    # Run KMeans + PCA
-    condos_kmean = kmeans_clustering(condos_pca)
-
-    # Label Mapping
-    cluster_map = {
-        0: "Premium Low-Risk",
-        1: "Value & High-Risk",
-        2: "Ultra-Luxury",
-        3: "Affordable Entry-Level",
-    }
-
-    labels_col = "Cluster_Label"
-
-    mapped = condos_kmean[labels_col].astype(object).map(cluster_map)
-
-    # ✅ Attach Cluster Labels to FINAL Output
-    condos_features["Cluster_Label"] = mapped.fillna("Other")
-
+    output_df = kmeans_clustering(output_df)
     print("✅ Clustering Completed.")
-
-    # 7. EXPORT
-    output_df = condos_features.drop(columns=["geometry"])
     
     # Save Overall
     output_all = f"{OUTPUT_DIR}/condos_scored_all.csv"
