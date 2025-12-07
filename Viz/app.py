@@ -278,7 +278,7 @@ def safe_pydeck_chart(deck: pdk.Deck, *, key: str, height: int = 560):
 # =============================
 # Data Loading & Processing
 # =============================
-DEFAULT_PATH = "condos_scored_all.csv" 
+DEFAULT_PATH = "Data/score_v2/condos_scored_all.csv" 
 
 with st.sidebar:
     st.markdown("<div class='sidebar-card'>", unsafe_allow_html=True)

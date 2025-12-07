@@ -156,10 +156,10 @@ def kmeans_clustering(df_input, k = 4):
 
     # Label Mapping
     cluster_map = {
-        0: "Premium Low-Risk",
+        0: "Premium",
         1: "Value & High-Risk",
-        2: "Ultra-Luxury",
-        3: "Affordable Entry-Level",
+        2: "Mid-Risk & Mid Price",
+        3: "Low-Risk & Low-Price",
     }
 
     labels_col = "Cluster_Label"
