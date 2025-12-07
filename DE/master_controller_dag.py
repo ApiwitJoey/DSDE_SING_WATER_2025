@@ -10,34 +10,34 @@ default_args = {
 with DAG(
     'master_controller_dag',
     default_args=default_args,
-    schedule=None, # กดมือเพื่อเริ่มกระบวนการทั้งหมด
+    schedule=None,
     catchup=False,
-    description='Run Traffy & Condo -> Then Run AI',
+    description='Run Traffy & Condo -> Then Run AI V2 Script 1',
 ) as dag:
 
-    # 1. สั่งรัน Traffy (และรอจนเสร็จ)
+    # 1. Run Traffy (Wait)
     trigger_traffy = TriggerDagRunOperator(
         task_id="trigger_traffy",
-        trigger_dag_id="traffy_cleansing_pipeline", # ต้องตรงกับ ID ในไฟล์ traffy_pipeline_dag.py
-        wait_for_completion=True, # สำคัญ! ต้องรอให้เสร็จก่อนไปต่อ
+        trigger_dag_id="traffy_cleansing_pipeline",
+        wait_for_completion=True,
         poke_interval=30
     )
 
-    # 2. สั่งรัน Condo Scraping (และรอจนเสร็จ)
+    # 2. Run Condo (Wait)
     trigger_condo = TriggerDagRunOperator(
         task_id="trigger_condo",
-        trigger_dag_id="parallel_condo_pipeline", # ต้องตรงกับ ID ในไฟล์ full_scraping_dag.py
-        wait_for_completion=True, # สำคัญ! ต้องรอให้เสร็จก่อนไปต่อ
+        trigger_dag_id="parallel_condo_pipeline",
+        wait_for_completion=True,
         poke_interval=60
     )
 
-    # 3. สั่งรัน AI Scoring (ทำท้ายสุด)
+    # 3. Run AI Scoring V2 (Updated Target)
     trigger_ai = TriggerDagRunOperator(
-        task_id="trigger_ai",
-        trigger_dag_id="ai_scoring_pipeline", # ต้องตรงกับ ID ในไฟล์ ai_scoring_dag.py
+        task_id="trigger_ai_v2",
+        # 🔥 แก้ไข: ชี้ไปที่ DAG ID ของไฟล์ Script 1 ที่คุณสร้างด้านบน
+        trigger_dag_id="condo_scoring_v2_script1_logic", 
         wait_for_completion=True
     )
 
-    # 🔗 ผูกความสัมพันธ์:
-    # Traffy กับ Condo ทำพร้อมกัน (Parallel) -> เสร็จทั้งคู่ค่อยทำ AI
+    # Condo + Traffy เสร็จพร้อมกัน -> จึงเริ่ม AI V2
     [trigger_traffy, trigger_condo] >> trigger_ai
